@@ -6,6 +6,7 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for
 from apscheduler.schedulers.background import BackgroundScheduler
 from models import init_db, get_db
 from scrapers import sync_drazby_sk, sync_datahub_ov
+from scraper_playwright import sync_drazby_playwright, sync_ov_playwright
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -27,6 +28,11 @@ scheduler.add_job(sync_drazby_sk, "cron", hour=6, minute=0, id="sync_drazby",
                   misfire_grace_time=3600, replace_existing=True)
 scheduler.add_job(sync_datahub_ov, "cron", hour=6, minute=30, id="sync_ov",
                   misfire_grace_time=3600, replace_existing=True)
+# Playwright-based scraping runs at 7:00 to get more comprehensive data
+scheduler.add_job(sync_drazby_playwright, "cron", hour=7, minute=0, id="sync_playwright_drazby",
+                  misfire_grace_time=3600, replace_existing=True)
+scheduler.add_job(sync_ov_playwright, "cron", hour=7, minute=30, id="sync_playwright_ov",
+                  misfire_grace_time=3600, replace_existing=True)
 
 
 REGIONS = [
@@ -35,7 +41,8 @@ REGIONS = [
     ("PO", "Prešovský"), ("KE", "Košický")
 ]
 
-SUBJECT_TYPES = ["Byt", "Dom", "Pozemok", "Nebytový priestor", "Podnik", "Súbor vecí", "Iný"]
+SUBJECT_TYPES = ["Byt", "Dom", "Rodinný dom", "Pozemok", "Nebytový priestor",
+                  "Komerčný objekt", "Garáž", "Podnik", "Súbor vecí", "Neurčené", "Iný"]
 
 
 @app.route("/")
@@ -181,6 +188,16 @@ def manual_sync():
             sync_drazby_sk()
         if source in ("all", "ov"):
             sync_datahub_ov()
+        if source in ("all", "playwright_drazby", "playwright"):
+            try:
+                sync_drazby_playwright()
+            except Exception as e:
+                logger.error(f"Playwright drazby sync error: {e}")
+        if source in ("all", "playwright_ov", "playwright"):
+            try:
+                sync_ov_playwright()
+            except Exception as e:
+                logger.error(f"Playwright OV sync error: {e}")
     except Exception as e:
         logger.error(f"Sync error: {e}")
     finally:

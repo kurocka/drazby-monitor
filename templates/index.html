@@ -39,8 +39,11 @@
     <form method="post" action="/sync" class="d-flex gap-2">
         <select name="source" class="form-select form-select-sm" style="width:auto">
             <option value="all">Všetky zdroje</option>
-            <option value="drazby">Drazby.sk</option>
-            <option value="ov">Obchodný vestník</option>
+            <option value="drazby">Drazby.sk (API)</option>
+            <option value="ov">Obchodný vestník (API)</option>
+            <option value="playwright">Playwright (všetko)</option>
+            <option value="playwright_drazby">Playwright: Drazby.sk</option>
+            <option value="playwright_ov">Playwright: OV</option>
         </select>
         <button type="submit" class="btn btn-sm btn-outline-primary">
             <i class="bi bi-arrow-repeat"></i> Synchronizovať
