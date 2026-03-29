@@ -305,26 +305,44 @@ def _xml_all_text(root, tag):
     return results
 
 
+def _is_auction_xml(content):
+    """Strictly check if OV XML is an auction announcement, not a business register extract etc."""
+    # STRICT: Only accept XML with explicit auction PodanieKapitola codes
+    AUCTION_KAPITOLA_CODES = [
+        "OV_Ex_Drazby", "OV_DRAZBA", "OV_Drazby_Dobrovolne",
+        "OV_DRAZBA_SUDNY_EXEKUTOR", "OV_DRAZBA_SPRAVCA_DANE",
+    ]
+    for code in AUCTION_KAPITOLA_CODES:
+        if code in content:
+            return True
+
+    # Also accept if the root element is a known auction type
+    AUCTION_ROOT_ELEMENTS = [
+        "DrazbaDobrovolna", "DrazbaExekutor", "DrazbaSpravcaDane",
+        "OznamenieODrazbe", "VyhlaskaDrazby",
+    ]
+    for root_el in AUCTION_ROOT_ELEMENTS:
+        if f"<{root_el}" in content:
+            return True
+
+    # Accept OpravaZrusenie only if it references a drazba kapitola
+    if "OpravaZrusenie" in content and any(code in content for code in AUCTION_KAPITOLA_CODES):
+        return True
+
+    # REJECT everything else - VypisOv, OznamenieVyzvaLikvidatorov, etc.
+    return False
+
+
 def _parse_ov_raw_issue(item):
-    """Parse a raw OV issue XML. Filter for auction-related announcements."""
+    """Parse a raw OV issue XML. Only accept actual auction announcements."""
     if not item:
         return None
 
     content = item.get("content", "") or ""
     item_id = item.get("id", "")
 
-    # Keywords indicating auction/sale content
-    auction_keywords = [
-        "dražb", "drazb", "exekú", "exeku", "aukci", "predaj",
-        "nehnuteľn", "nehnute", "pozemok", "pozemk",
-        "majetk", "speňaž", "spenaz", "ponukové konanie",
-        "súpis majetku", "likvidá"
-    ]
-
-    content_lower = content.lower()
-    is_auction_related = any(kw in content_lower for kw in auction_keywords)
-
-    if not is_auction_related:
+    # Strict filter - reject non-auction XML types
+    if not _is_auction_xml(content):
         return None
 
     # Parse XML to extract structured data
@@ -339,7 +357,6 @@ def _parse_ov_raw_issue(item):
     zip_code = ""
 
     try:
-        # Remove BOM if present
         xml_content = content.lstrip('\ufeff')
         root = ET.fromstring(xml_content)
 
@@ -349,16 +366,23 @@ def _parse_ov_raw_issue(item):
         ov_number = _xml_text(root, "OV") or ""
         publish_date = _xml_text(root, "DatumVydania") or ""
 
-        # Extract location from address elements
         city = _xml_text(root, "Obec") or ""
         street = _xml_text(root, "Ulica") or ""
         zip_code = _xml_text(root, "Psc") or ""
 
-        # Get the main announcement text
         publish_text = _xml_text(root, "ZverejnujeText") or ""
         publish_text = _strip_html(publish_text)
+
+        # Also try to get structured auction fields
+        if not publish_text:
+            # Try common auction XML fields
+            for field in ["PredmetDrazby", "MiestoDrazby", "PopisPredmetu",
+                          "OpisNehnutelnosti", "PopisNehnutelnosti"]:
+                val = _xml_text(root, field)
+                if val:
+                    publish_text += _strip_html(val) + "\n"
     except ET.ParseError:
-        pass
+        return None
 
     # Build meaningful title
     title_parts = []
@@ -370,33 +394,32 @@ def _parse_ov_raw_issue(item):
         title_parts.append(f"| {subject_name}")
     if city:
         title_parts.append(f"({city})")
-    title = " ".join(title_parts) if title_parts else f"OV oznámenie #{item_id}"
+    title = " ".join(title_parts) if title_parts else f"Dražba OV #{item_id}"
     title = title[:200]
 
-    # Determine property type from full text
-    full_text_lower = (content + " " + publish_text).lower()
+    # Determine property type from publish text (not from full XML which has noise)
+    text_lower = publish_text.lower()
     subject_type = "Neurčené"
-    if "pozemok" in full_text_lower or "pozemk" in full_text_lower or "orná pôda" in full_text_lower:
+    if "pozemok" in text_lower or "pozemk" in text_lower or "orná pôda" in text_lower:
         subject_type = "Pozemok"
-    elif "byt " in full_text_lower or "bytov" in full_text_lower:
-        subject_type = "Byt"
-    elif "rodinný dom" in full_text_lower:
+    elif "rodinný dom" in text_lower:
         subject_type = "Rodinný dom"
-    elif "dom " in full_text_lower:
+    elif re.search(r'\bbyt\b', text_lower) or "bytov" in text_lower:
+        subject_type = "Byt"
+    elif re.search(r'\bdom\b', text_lower):
         subject_type = "Dom"
-    elif "nebytov" in full_text_lower:
+    elif "nebytov" in text_lower:
         subject_type = "Nebytový priestor"
 
-    # Extract price
+    # Extract price from publish text only
     price = None
-    price_text = publish_text or content
     price_patterns = [
-        r'(\d[\d\s]*[\d,.]+)\s*(?:EUR|eur|€)',
         r'najnižš[eí]\s+podanie[:\s]*(\d[\d\s]*[\d,.]+)',
         r'vyvolávacia\s+cena[:\s]*(\d[\d\s]*[\d,.]+)',
+        r'(\d[\d\s]*[\d,.]+)\s*(?:EUR|eur|€)',
     ]
     for pattern in price_patterns:
-        match = re.search(pattern, price_text)
+        match = re.search(pattern, publish_text)
         if match:
             price_str = match.group(1).replace(" ", "").replace(",", ".")
             try:
@@ -407,18 +430,16 @@ def _parse_ov_raw_issue(item):
                 pass
             break
 
-    # Extract region
+    # Extract region from publish text
     region = ""
     for rcode, rname in REGION_MAP.items():
-        if rname.lower() in full_text_lower:
+        if rname.lower() in text_lower:
             region = rname
             break
 
-    # Extract auction date
+    # Extract auction date from publish text
     auction_date = ""
-    date_match = re.search(
-        r'(\d{1,2})\.\s*(\d{1,2})\.\s*(20\d{2})', publish_text or content
-    )
+    date_match = re.search(r'(\d{1,2})\.\s*(\d{1,2})\.\s*(20\d{2})', publish_text)
     if date_match:
         try:
             d, m, y = date_match.groups()
