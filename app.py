@@ -167,17 +167,25 @@ def auction_detail(auction_id):
         conn.close()
 
 
+_sync_running = False
+
 @app.route("/sync", methods=["POST"])
 def manual_sync():
+    global _sync_running
+    if _sync_running:
+        return redirect(url_for("index"))
+    _sync_running = True
     source = request.form.get("source", "all")
     try:
         if source in ("all", "drazby"):
             sync_drazby_sk()
         if source in ("all", "ov"):
             sync_datahub_ov()
-        return redirect(url_for("index"))
     except Exception as e:
-        return f"Chyba pri synchronizácii: {e}", 500
+        logger.error(f"Sync error: {e}")
+    finally:
+        _sync_running = False
+    return redirect(url_for("index"))
 
 
 @app.route("/filters", methods=["GET", "POST"])

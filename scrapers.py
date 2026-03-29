@@ -67,6 +67,7 @@ def sync_drazby_sk():
                         upsert_auction(conn, auction)
                         total_new += 1
 
+                conn.commit()
                 total_fetched += len(rows)
                 paginator = datatable.get("paginator", {})
                 last_key = paginator.get("last_key")
