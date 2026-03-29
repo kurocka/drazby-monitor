@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Uložené filtre - Dražby SK Monitor{% endblock %}
+{% block content %}
+
+<h4 class="mb-4"><i class="bi bi-funnel"></i> Uložené filtre</h4>
+
+<div class="row">
+    <div class="col-md-5">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h6>Nový filter</h6>
+                <form method="post" action="/filters">
+                    <div class="mb-2">
+                        <label class="form-label small">Názov filtra</label>
+                        <input type="text" name="name" class="form-control form-control-sm" required placeholder="napr. Pozemky Košice do 50k">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small">Typy nehnuteľností (čiarkou oddelené)</label>
+                        <input type="text" name="subject_types" class="form-control form-control-sm" placeholder="Pozemok, Byt, Dom">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small">Kraje (čiarkou oddelené)</label>
+                        <input type="text" name="regions" class="form-control form-control-sm" placeholder="Košický, Prešovský">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small">Okresy (čiarkou oddelené)</label>
+                        <input type="text" name="districts" class="form-control form-control-sm" placeholder="Košice I, Košice-okolie">
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col">
+                            <label class="form-label small">Cena od (€)</label>
+                            <input type="number" name="price_min" class="form-control form-control-sm">
+                        </div>
+                        <div class="col">
+                            <label class="form-label small">Cena do (€)</label>
+                            <input type="number" name="price_max" class="form-control form-control-sm">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small">Kľúčové slová (čiarkou oddelené)</label>
+                        <input type="text" name="keywords" class="form-control form-control-sm" placeholder="záhrada, orná pôda">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm w-100">
+                        <i class="bi bi-plus-circle"></i> Uložiť filter
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-7">
+        {% if filters %}
+        {% for f in filters %}
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body d-flex justify-content-between align-items-start">
+                <div>
+                    <h6 class="mb-1">{{ f.name }}</h6>
+                    <small class="text-muted">
+                        {% if f.subject_types %}<span class="badge bg-info me-1">{{ f.subject_types }}</span>{% endif %}
+                        {% if f.regions %}<span class="badge bg-secondary me-1">{{ f.regions }}</span>{% endif %}
+                        {% if f.districts %}<span class="badge bg-secondary me-1">{{ f.districts }}</span>{% endif %}
+                        {% if f.price_min or f.price_max %}
+                        <span class="badge bg-success">
+                            {{ f.price_min or '0' }}€ - {{ f.price_max or '∞' }}€
+                        </span>
+                        {% endif %}
+                        {% if f.keywords %}<br><i class="bi bi-tag"></i> {{ f.keywords }}{% endif %}
+                    </small>
+                    <br><small class="text-muted">Vytvorený: {{ f.created_at }}</small>
+                </div>
+                <div class="d-flex gap-2">
+                    <a href="/?subject_type={{ (f.subject_types or '').split(',')[0]|trim }}&region={{ (f.regions or '').split(',')[0]|trim }}&price_min={{ f.price_min or '' }}&price_max={{ f.price_max or '' }}&keyword={{ (f.keywords or '').split(',')[0]|trim }}"
+                       class="btn btn-sm btn-outline-primary" title="Použiť">
+                        <i class="bi bi-search"></i>
+                    </a>
+                    <form method="post" action="/filters/{{ f.id }}/delete" class="d-inline">
+                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Zmazať"
+                                onclick="return confirm('Naozaj zmazať filter?')">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="text-center text-muted py-5">
+            <i class="bi bi-funnel" style="font-size:2rem"></i>
+            <p class="mt-2">Zatiaľ nemáte žiadne uložené filtre.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% endblock %}

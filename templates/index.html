@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% block title %}Dražby SK Monitor{% endblock %}
+{% block content %}
+
+<!-- Stats -->
+<div class="row mb-4">
+    <div class="col-md-4">
+        <div class="card stat-card text-center p-3">
+            <div class="number text-primary">{{ stats.total }}</div>
+            <div class="text-muted">Celkom dražieb</div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card text-center p-3">
+            <div class="number text-info">{{ stats.planned }}</div>
+            <div class="text-muted">Plánované</div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card text-center p-3">
+            <div class="number text-danger">{{ stats.current }}</div>
+            <div class="text-muted">Aktuálne</div>
+        </div>
+    </div>
+</div>
+
+<!-- Sync controls -->
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="sync-info">
+        {% for s in last_sync %}
+            <span class="me-3">
+                <i class="bi bi-arrow-repeat"></i> {{ s.source }}:
+                {{ s.finished_at or 'prebieha...' }}
+                {% if s.records_new %}(+{{ s.records_new }}){% endif %}
+                <span class="badge {% if s.status == 'success' %}bg-success{% elif s.status == 'error' %}bg-danger{% else %}bg-warning{% endif %}">{{ s.status }}</span>
+            </span>
+        {% endfor %}
+    </div>
+    <form method="post" action="/sync" class="d-flex gap-2">
+        <select name="source" class="form-select form-select-sm" style="width:auto">
+            <option value="all">Všetky zdroje</option>
+            <option value="drazby">Drazby.sk</option>
+            <option value="ov">Obchodný vestník</option>
+        </select>
+        <button type="submit" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-arrow-repeat"></i> Synchronizovať
+        </button>
+    </form>
+</div>
+
+<!-- Filters -->
+<div class="filter-panel">
+    <form method="get" action="/">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-2">
+                <label class="form-label small">Typ nehnuteľnosti</label>
+                <select name="subject_type" class="form-select form-select-sm">
+                    <option value="">Všetky</option>
+                    {% for st in subject_types %}
+                    <option value="{{ st }}" {% if filters.subject_type == st %}selected{% endif %}>{{ st }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Kraj</label>
+                <select name="region" class="form-select form-select-sm" id="regionSelect">
+                    <option value="">Všetky</option>
+                    {% for code, name in regions %}
+                    <option value="{{ name }}" {% if filters.region == name %}selected{% endif %}>{{ name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Okres</label>
+                <input type="text" name="district" class="form-control form-control-sm"
+                       value="{{ filters.district }}" placeholder="napr. Košice I" list="districtList">
+                <datalist id="districtList">
+                    {% for d in districts %}
+                    <option value="{{ d }}">
+                    {% endfor %}
+                </datalist>
+            </div>
+            <div class="col-md-1">
+                <label class="form-label small">Cena od</label>
+                <input type="number" name="price_min" class="form-control form-control-sm"
+                       value="{{ filters.price_min }}" placeholder="€">
+            </div>
+            <div class="col-md-1">
+                <label class="form-label small">Cena do</label>
+                <input type="number" name="price_max" class="form-control form-control-sm"
+                       value="{{ filters.price_max }}" placeholder="€">
+            </div>
+            <div class="col-md-1">
+                <label class="form-label small">Stav</label>
+                <select name="status" class="form-select form-select-sm">
+                    <option value="">Všetky</option>
+                    <option value="planned" {% if filters.status == 'planned' %}selected{% endif %}>Plánované</option>
+                    <option value="current" {% if filters.status == 'current' %}selected{% endif %}>Aktuálne</option>
+                </select>
+            </div>
+            <div class="col-md-1">
+                <label class="form-label small">Zdroj</label>
+                <select name="source" class="form-select form-select-sm">
+                    <option value="">Všetky</option>
+                    <option value="drazby.sk" {% if filters.source == 'drazby.sk' %}selected{% endif %}>Drazby.sk</option>
+                    <option value="obchodny_vestnik" {% if filters.source == 'obchodny_vestnik' %}selected{% endif %}>OV</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Kľúčové slovo</label>
+                <div class="input-group input-group-sm">
+                    <input type="text" name="keyword" class="form-control"
+                           value="{{ filters.keyword }}" placeholder="Hľadať...">
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-search"></i></button>
+                </div>
+            </div>
+        </div>
+        <input type="hidden" name="sort" value="{{ filters.sort }}">
+        <input type="hidden" name="order" value="{{ filters.order }}">
+        {% if filters.subject_type or filters.region or filters.district or filters.price_min or filters.price_max or filters.status or filters.source or filters.keyword %}
+        <div class="mt-2">
+            <a href="/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-x-circle"></i> Zrušiť filtre</a>
+            <span class="text-muted small ms-2">Nájdených: {{ count }} dražieb</span>
+        </div>
+        {% endif %}
+    </form>
+</div>
+
+<!-- Results table -->
+<div class="card border-0 shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:5%">Typ</th>
+                    <th style="width:30%">Názov</th>
+                    <th>Lokalita</th>
+                    <th>
+                        <a href="?subject_type={{ filters.subject_type }}&region={{ filters.region }}&district={{ filters.district }}&price_min={{ filters.price_min }}&price_max={{ filters.price_max }}&status={{ filters.status }}&source={{ filters.source }}&keyword={{ filters.keyword }}&sort=auction_date&order={% if filters.sort == 'auction_date' and filters.order == 'asc' %}desc{% else %}asc{% endif %}" class="text-decoration-none text-dark">
+                            Dátum {% if filters.sort == 'auction_date' %}<i class="bi bi-arrow-{% if filters.order == 'asc' %}up{% else %}down{% endif %}"></i>{% else %}<i class="bi bi-arrow-down-up text-muted"></i>{% endif %}
+                        </a>
+                    </th>
+                    <th>
+                        <a href="?subject_type={{ filters.subject_type }}&region={{ filters.region }}&district={{ filters.district }}&price_min={{ filters.price_min }}&price_max={{ filters.price_max }}&status={{ filters.status }}&source={{ filters.source }}&keyword={{ filters.keyword }}&sort=price&order={% if filters.sort == 'price' and filters.order == 'asc' %}desc{% else %}asc{% endif %}" class="text-decoration-none text-dark">
+                            Cena {% if filters.sort == 'price' %}<i class="bi bi-arrow-{% if filters.order == 'asc' %}up{% else %}down{% endif %}"></i>{% else %}<i class="bi bi-arrow-down-up text-muted"></i>{% endif %}
+                        </a>
+                    </th>
+                    <th>Stav</th>
+                    <th>Zdroj</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for a in auctions %}
+                <tr class="auction-row">
+                    <td>
+                        {% if a.subject_type == 'Pozemok' %}<i class="bi bi-tree text-success" title="Pozemok"></i>
+                        {% elif a.subject_type == 'Byt' %}<i class="bi bi-building text-primary" title="Byt"></i>
+                        {% elif a.subject_type == 'Dom' %}<i class="bi bi-house text-warning" title="Dom"></i>
+                        {% else %}<i class="bi bi-box text-secondary" title="{{ a.subject_type }}"></i>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="/auction/{{ a.id }}" class="auction-link fw-semibold">
+                            {{ a.title or 'Bez názvu' }}
+                        </a>
+                        {% if a.subject_subtype %}
+                        <br><small class="text-muted">{{ a.subject_subtype }}</small>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <small>
+                            {% if a.city %}{{ a.city }}{% endif %}
+                            {% if a.district %}<br>{{ a.district }}{% endif %}
+                            {% if a.region %}<br><span class="text-muted">{{ a.region }}</span>{% endif %}
+                        </small>
+                    </td>
+                    <td>
+                        {% if a.auction_date %}
+                        <span class="{% if a.auction_date >= now_str %}text-dark{% else %}text-muted{% endif %}">
+                            {{ a.auction_date }}
+                        </span>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if a.price %}
+                        <span class="price-tag">{{ "{:,.0f}".format(a.price) }} €</span>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge {% if a.status == 'current' %}badge-current{% elif a.status == 'planned' %}badge-planned{% else %}bg-secondary{% endif %}">
+                            {{ a.status }}
+                        </span>
+                    </td>
+                    <td><small class="text-muted">{{ a.source }}</small></td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="text-center py-5 text-muted">
+                        <i class="bi bi-inbox" style="font-size:2rem"></i>
+                        <p class="mt-2">Žiadne dražby. Spustite synchronizáciu alebo upravte filtre.</p>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<nav class="mt-3">
+    <ul class="pagination pagination-sm justify-content-center">
+        {% if page > 1 %}
+        <li class="page-item"><a class="page-link" href="?page={{ page-1 }}&subject_type={{ filters.subject_type }}&region={{ filters.region }}&district={{ filters.district }}&price_min={{ filters.price_min }}&price_max={{ filters.price_max }}&status={{ filters.status }}&source={{ filters.source }}&keyword={{ filters.keyword }}&sort={{ filters.sort }}&order={{ filters.order }}">&laquo;</a></li>
+        {% endif %}
+        {% for p in range(1, total_pages + 1) %}
+            {% if p == page %}
+            <li class="page-item active"><span class="page-link">{{ p }}</span></li>
+            {% elif p <= 3 or p > total_pages - 3 or (p >= page - 2 and p <= page + 2) %}
+            <li class="page-item"><a class="page-link" href="?page={{ p }}&subject_type={{ filters.subject_type }}&region={{ filters.region }}&district={{ filters.district }}&price_min={{ filters.price_min }}&price_max={{ filters.price_max }}&status={{ filters.status }}&source={{ filters.source }}&keyword={{ filters.keyword }}&sort={{ filters.sort }}&order={{ filters.order }}">{{ p }}</a></li>
+            {% elif p == 4 or p == total_pages - 3 %}
+            <li class="page-item disabled"><span class="page-link">...</span></li>
+            {% endif %}
+        {% endfor %}
+        {% if page < total_pages %}
+        <li class="page-item"><a class="page-link" href="?page={{ page+1 }}&subject_type={{ filters.subject_type }}&region={{ filters.region }}&district={{ filters.district }}&price_min={{ filters.price_min }}&price_max={{ filters.price_max }}&status={{ filters.status }}&source={{ filters.source }}&keyword={{ filters.keyword }}&sort={{ filters.sort }}&order={{ filters.order }}">&raquo;</a></li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+
+{% endblock %}

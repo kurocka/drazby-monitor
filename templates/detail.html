@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}{{ auction.title }} - Dražby SK Monitor{% endblock %}
+{% block content %}
+
+<a href="/" class="btn btn-sm btn-outline-secondary mb-3"><i class="bi bi-arrow-left"></i> Späť</a>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body">
+                <h4 class="card-title">
+                    {% if auction.subject_type == 'Pozemok' %}<i class="bi bi-tree text-success"></i>
+                    {% elif auction.subject_type == 'Byt' %}<i class="bi bi-building text-primary"></i>
+                    {% elif auction.subject_type == 'Dom' %}<i class="bi bi-house text-warning"></i>
+                    {% else %}<i class="bi bi-box text-secondary"></i>
+                    {% endif %}
+                    {{ auction.title }}
+                </h4>
+
+                <div class="row mt-4">
+                    <div class="col-md-6">
+                        <table class="table table-sm">
+                            <tr><th>Typ</th><td>{{ auction.subject_type }}{% if auction.subject_subtype %} / {{ auction.subject_subtype }}{% endif %}</td></tr>
+                            <tr><th>Stav</th><td>
+                                <span class="badge {% if auction.status == 'current' %}badge-current{% elif auction.status == 'planned' %}badge-planned{% else %}bg-secondary{% endif %}">
+                                    {{ auction.status }}
+                                </span>
+                            </td></tr>
+                            <tr><th>Dátum dražby</th><td>{{ auction.auction_date or '-' }}</td></tr>
+                            <tr><th>Cena</th><td>
+                                {% if auction.price %}
+                                <span class="price-tag">{{ "{:,.0f}".format(auction.price) }} {{ auction.currency }}</span>
+                                {% else %}-{% endif %}
+                            </td></tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <table class="table table-sm">
+                            <tr><th>Mesto</th><td>{{ auction.city or '-' }}</td></tr>
+                            <tr><th>Adresa</th><td>{{ auction.address or '-' }}</td></tr>
+                            <tr><th>Okres</th><td>{{ auction.district or '-' }}</td></tr>
+                            <tr><th>Kraj</th><td>{{ auction.region or '-' }}</td></tr>
+                        </table>
+                    </div>
+                </div>
+
+                {% if auction.description %}
+                <hr>
+                <h6>Popis</h6>
+                <div class="bg-light p-3 rounded" style="white-space: pre-wrap; max-height: 400px; overflow-y: auto;">{{ auction.description }}</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <!-- Source link -->
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body">
+                <h6><i class="bi bi-link-45deg"></i> Zdroj</h6>
+                <p class="mb-1"><small class="text-muted">{{ auction.source }}</small></p>
+                {% if auction.url %}
+                <a href="{{ auction.url }}" target="_blank" class="btn btn-sm btn-outline-primary w-100">
+                    <i class="bi bi-box-arrow-up-right"></i> Zobraziť originál
+                </a>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Map -->
+        {% if auction.lat and auction.lon %}
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body">
+                <h6><i class="bi bi-geo-alt"></i> Mapa</h6>
+                <iframe
+                    width="100%" height="250" frameborder="0" style="border:0; border-radius:8px;"
+                    src="https://www.openstreetmap.org/export/embed.html?bbox={{ auction.lon - 0.01 }},{{ auction.lat - 0.01 }},{{ auction.lon + 0.01 }},{{ auction.lat + 0.01 }}&layer=mapnik&marker={{ auction.lat }},{{ auction.lon }}"
+                    allowfullscreen>
+                </iframe>
+                <a href="https://www.openstreetmap.org/?mlat={{ auction.lat }}&mlon={{ auction.lon }}#map=15/{{ auction.lat }}/{{ auction.lon }}"
+                   target="_blank" class="btn btn-sm btn-outline-secondary w-100 mt-2">
+                    Väčšia mapa
+                </a>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Info -->
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h6><i class="bi bi-info-circle"></i> Info</h6>
+                <small class="text-muted">
+                    Pridané: {{ auction.created_at }}<br>
+                    Aktualizované: {{ auction.updated_at }}<br>
+                    ID: {{ auction.id }}
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if raw %}
+<div class="card border-0 shadow-sm mt-3">
+    <div class="card-body">
+        <h6>
+            <a data-bs-toggle="collapse" href="#rawData" class="text-decoration-none">
+                <i class="bi bi-code-slash"></i> Surové dáta (JSON)
+            </a>
+        </h6>
+        <div class="collapse" id="rawData">
+            <pre class="bg-dark text-light p-3 rounded" style="max-height:400px; overflow:auto; font-size:0.8rem;">{{ raw | tojson(indent=2) }}</pre>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}
