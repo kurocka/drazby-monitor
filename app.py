@@ -265,8 +265,57 @@ def api_stats():
         conn.close()
 
 
+def _startup_sync():
+    """Run initial sync on startup if database is empty (e.g. after Railway redeploy)."""
+    import threading
+    conn = get_db()
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM auctions").fetchone()[0]
+    finally:
+        conn.close()
+
+    if count > 0:
+        logger.info(f"Database has {count} auctions, skipping startup sync")
+        return
+
+    logger.info("Database is empty, starting auto-sync in background...")
+
+    def _run_sync():
+        global _sync_running
+        if _sync_running:
+            return
+        _sync_running = True
+        try:
+            # First: quick API syncs
+            try:
+                sync_drazby_sk()
+            except Exception as e:
+                logger.error(f"Startup drazby API sync error: {e}")
+            try:
+                sync_datahub_ov()
+            except Exception as e:
+                logger.error(f"Startup OV API sync error: {e}")
+            # Then: Playwright syncs (slower but more data)
+            try:
+                sync_drazby_playwright()
+            except Exception as e:
+                logger.error(f"Startup drazby Playwright sync error: {e}")
+            try:
+                sync_ov_playwright()
+            except Exception as e:
+                logger.error(f"Startup OV Playwright sync error: {e}")
+            logger.info("Startup sync completed!")
+        finally:
+            _sync_running = False
+
+    thread = threading.Thread(target=_run_sync, daemon=True)
+    thread.start()
+
+
 if __name__ == "__main__":
     scheduler.start()
     port = int(os.environ.get("PORT", 5555))
     debug = os.environ.get("RAILWAY_ENVIRONMENT") is None
+    # Auto-sync on startup if DB is empty
+    _startup_sync()
     app.run(host="0.0.0.0", debug=debug, port=port, use_reloader=False)
