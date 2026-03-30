@@ -6,7 +6,7 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for
 from apscheduler.schedulers.background import BackgroundScheduler
 from models import init_db, get_db
 from scrapers import sync_drazby_sk, sync_datahub_ov
-from scraper_playwright import sync_drazby_playwright, sync_ov_playwright
+from scraper_playwright import sync_drazby_playwright, sync_ov_playwright, DISTRICT_TO_REGION, _region_from_district
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -202,6 +202,68 @@ def manual_sync():
         logger.error(f"Sync error: {e}")
     finally:
         _sync_running = False
+    return redirect(url_for("index"))
+
+
+@app.route("/cleanup", methods=["POST"])
+def cleanup_data():
+    """Re-process existing records: fill missing regions from districts, normalize names, remove junk."""
+    conn = get_db()
+    try:
+        fixed = 0
+
+        # 1. Fill missing region from district using the mapping
+        rows = conn.execute(
+            "SELECT id, district, region FROM auctions WHERE district != '' AND (region = '' OR region IS NULL)"
+        ).fetchall()
+        for row in rows:
+            region = _region_from_district(row["district"])
+            if region:
+                conn.execute("UPDATE auctions SET region=?, updated_at=datetime('now') WHERE id=?",
+                             (region, row["id"]))
+                fixed += 1
+
+        # 2. Normalize region names (fix "X kraj" → canonical names)
+        region_fixes = {
+            "Trenčiansky kraj": "Trenčiansky", "Nitriansky kraj": "Nitriansky",
+            "Košický kraj": "Košický", "Prešovský kraj": "Prešovský",
+            "Bratislavský kraj": "Bratislavský", "Trnavský kraj": "Trnavský",
+            "Žilinský kraj": "Žilinský", "Banskobystrický kraj": "Banskobystrický",
+        }
+        for wrong, correct in region_fixes.items():
+            result = conn.execute("UPDATE auctions SET region=? WHERE region=?", (correct, wrong))
+            fixed += result.rowcount
+
+        # 3. Clean up city/district: trim whitespace, remove trailing garbage
+        rows = conn.execute(
+            "SELECT id, city, district FROM auctions WHERE city LIKE '% ' OR city LIKE ' %' OR district LIKE '% ' OR district LIKE ' %'"
+        ).fetchall()
+        for row in rows:
+            city = (row["city"] or "").strip()
+            district = (row["district"] or "").strip()
+            conn.execute("UPDATE auctions SET city=?, district=? WHERE id=?",
+                         (city, district, row["id"]))
+            fixed += 1
+
+        # 4. Remove non-real-estate entries (pohľadávky that slipped through)
+        result = conn.execute("""
+            DELETE FROM auctions WHERE
+            (description LIKE '%pohľadávk%' OR description LIKE '%peňažn%' OR title LIKE '%pohľadávk%')
+            AND description NOT LIKE '%nehnuteľnost%'
+            AND description NOT LIKE '%pozemok%'
+            AND description NOT LIKE '%parcela%'
+            AND description NOT LIKE '%dom%'
+            AND description NOT LIKE '%byt%'
+            AND description NOT LIKE '%stavba%'
+        """)
+        removed = result.rowcount
+
+        conn.commit()
+        logger.info(f"Data cleanup: fixed={fixed}, removed={removed}")
+    except Exception as e:
+        logger.error(f"Cleanup error: {e}")
+    finally:
+        conn.close()
     return redirect(url_for("index"))
 
 

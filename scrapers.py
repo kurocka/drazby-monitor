@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 from html import unescape
 from datetime import datetime, timedelta
 from models import get_db, upsert_auction
+from scraper_playwright import DISTRICT_TO_REGION, _region_from_district
 
 logger = logging.getLogger(__name__)
 
@@ -459,6 +460,10 @@ def _parse_ov_raw_issue(item):
         if rname.lower() in text_lower:
             region = rname
             break
+
+    # Fallback: derive region from district
+    if not region and district:
+        region = _region_from_district(district)
 
     # Extract auction date from publish text
     auction_date = ""
