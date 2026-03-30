@@ -400,6 +400,13 @@ def _parse_ov_raw_issue(item):
     # Determine property type from publish text (not from full XML which has noise)
     text_lower = publish_text.lower()
     subject_type = "Neurčené"
+
+    # Check for monetary claims (pohľadávky) - not real estate
+    has_claim = any(kw in text_lower for kw in ['pohľadávk', 'peňažn', 'odkúpenie pohľadávk'])
+    has_realestate = any(kw in text_lower for kw in ['nehnuteľnost', 'pozemok', 'parcela', 'dom', 'byt', 'stavba'])
+    if has_claim and not has_realestate:
+        return None  # Skip monetary claims entirely
+
     if "pozemok" in text_lower or "pozemk" in text_lower or "orná pôda" in text_lower:
         subject_type = "Pozemok"
     elif "rodinný dom" in text_lower:
@@ -429,6 +436,22 @@ def _parse_ov_raw_issue(item):
             except ValueError:
                 pass
             break
+
+    # Extract district from publish text
+    district = ""
+    district_match = re.search(r'okres[:\s]+([A-ZÁ-Ža-zá-ž][A-ZÁ-Ža-zá-ž\s-]{2,50}?)(?:\s*,|\s*obec|\s*katastr|\s*\n)', publish_text, re.IGNORECASE)
+    if district_match:
+        district = district_match.group(1).strip()[:80]
+
+    # Extract city from katastrálne územie if not found from XML
+    if not city:
+        ku_match = re.search(r'katastrálne\s+územie[:\s]+([A-ZÁ-Ža-zá-ž][A-ZÁ-Ža-zá-ž\s-]{1,50}?)(?:\s*,|\s*zapís|\s*okres|\s*\n)', publish_text, re.IGNORECASE)
+        if ku_match:
+            city = ku_match.group(1).strip()[:80]
+    if not city:
+        ku_match = re.search(r'k\.ú\.\s+([A-ZÁ-Ža-zá-ž][A-ZÁ-Ža-zá-ž\s-]{1,50}?)(?:\s*,|\s*obec|\s*okres|\s*\n)', publish_text, re.IGNORECASE)
+        if ku_match:
+            city = ku_match.group(1).strip()[:80]
 
     # Extract region from publish text
     region = ""
@@ -471,7 +494,7 @@ def _parse_ov_raw_issue(item):
         "subject_type": subject_type,
         "subject_subtype": filing_type,
         "region": region,
-        "district": "",
+        "district": district,
         "city": city,
         "address": address,
         "auction_date": auction_date,

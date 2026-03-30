@@ -85,7 +85,16 @@ def upsert_auction(conn, auction):
         ON CONFLICT(id) DO UPDATE SET
             title=excluded.title, status=excluded.status, price=excluded.price,
             auction_date=excluded.auction_date, description=excluded.description,
-            raw_data=excluded.raw_data, updated_at=datetime('now')
+            raw_data=excluded.raw_data,
+            region=COALESCE(NULLIF(excluded.region, ''), auctions.region),
+            district=COALESCE(NULLIF(excluded.district, ''), auctions.district),
+            city=COALESCE(NULLIF(excluded.city, ''), auctions.city),
+            address=COALESCE(NULLIF(excluded.address, ''), auctions.address),
+            subject_type=CASE
+                WHEN excluded.subject_type != '' AND excluded.subject_type != 'Neurčené' THEN excluded.subject_type
+                ELSE COALESCE(auctions.subject_type, excluded.subject_type)
+            END,
+            updated_at=datetime('now')
     """, (
         auction["id"], auction["source"], auction.get("title"),
         auction.get("subject_type"), auction.get("subject_subtype"),

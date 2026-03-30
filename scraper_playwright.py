@@ -21,6 +21,72 @@ REGION_MAP = {
     "PO": "Prešovský", "KE": "Košický"
 }
 
+# District → Region mapping for all 79 Slovak districts
+DISTRICT_TO_REGION = {
+    "Bratislava I": "Bratislavský", "Bratislava II": "Bratislavský",
+    "Bratislava III": "Bratislavský", "Bratislava IV": "Bratislavský",
+    "Bratislava V": "Bratislavský", "Malacky": "Bratislavský",
+    "Pezinok": "Bratislavský", "Senec": "Bratislavský",
+    "Dunajská Streda": "Trnavský", "Galanta": "Trnavský",
+    "Hlohovec": "Trnavský", "Piešťany": "Trnavský",
+    "Senica": "Trnavský", "Skalica": "Trnavský", "Trnava": "Trnavský",
+    "Bánovce nad Bebravou": "Trenčiansky", "Ilava": "Trenčiansky",
+    "Myjava": "Trenčiansky", "Nové Mesto nad Váhom": "Trenčiansky",
+    "Partizánske": "Trenčiansky", "Považská Bystrica": "Trenčiansky",
+    "Prievidza": "Trenčiansky", "Púchov": "Trenčiansky",
+    "Trenčín": "Trenčiansky",
+    "Komárno": "Nitriansky", "Levice": "Nitriansky",
+    "Nitra": "Nitriansky", "Nové Zámky": "Nitriansky",
+    "Šaľa": "Nitriansky", "Topoľčany": "Nitriansky",
+    "Zlaté Moravce": "Nitriansky",
+    "Bytča": "Žilinský", "Čadca": "Žilinský",
+    "Dolný Kubín": "Žilinský", "Kysucké Nové Mesto": "Žilinský",
+    "Liptovský Mikuláš": "Žilinský", "Martin": "Žilinský",
+    "Námestovo": "Žilinský", "Ružomberok": "Žilinský",
+    "Turčianske Teplice": "Žilinský", "Tvrdošín": "Žilinský",
+    "Žilina": "Žilinský",
+    "Banská Bystrica": "Banskobystrický", "Banská Štiavnica": "Banskobystrický",
+    "Brezno": "Banskobystrický", "Detva": "Banskobystrický",
+    "Krupina": "Banskobystrický", "Lučenec": "Banskobystrický",
+    "Poltár": "Banskobystrický", "Revúca": "Banskobystrický",
+    "Rimavská Sobota": "Banskobystrický", "Veľký Krtíš": "Banskobystrický",
+    "Zvolen": "Banskobystrický", "Žarnovica": "Banskobystrický",
+    "Žiar nad Hronom": "Banskobystrický",
+    "Bardejov": "Prešovský", "Humenné": "Prešovský",
+    "Kežmarok": "Prešovský", "Levoča": "Prešovský",
+    "Medzilaborce": "Prešovský", "Poprad": "Prešovský",
+    "Prešov": "Prešovský", "Sabinov": "Prešovský",
+    "Snina": "Prešovský", "Stará Ľubovňa": "Prešovský",
+    "Stropkov": "Prešovský", "Svidník": "Prešovský",
+    "Vranov nad Topľou": "Prešovský",
+    "Gelnica": "Košický", "Košice I": "Košický",
+    "Košice II": "Košický", "Košice III": "Košický",
+    "Košice IV": "Košický", "Košice-okolie": "Košický",
+    "Michalovce": "Košický", "Rožňava": "Košický",
+    "Sobrance": "Košický", "Spišská Nová Ves": "Košický",
+    "Trebišov": "Košický",
+}
+
+
+def _region_from_district(district):
+    """Look up region from district name, with fuzzy matching."""
+    if not district:
+        return ""
+    # Exact match
+    if district in DISTRICT_TO_REGION:
+        return DISTRICT_TO_REGION[district]
+    # Case-insensitive match
+    district_lower = district.lower().strip()
+    for d, r in DISTRICT_TO_REGION.items():
+        if d.lower() == district_lower:
+            return r
+    # Substring match (e.g. "Bánovce nad Bebravou" in "Okresný súd Bánovce nad Bebravou")
+    for d, r in DISTRICT_TO_REGION.items():
+        if d.lower() in district_lower or district_lower in d.lower():
+            return r
+    return ""
+
+
 # OV chapter codes for auctions
 OV_AUCTION_CHAPTERS = [
     "OV_D",       # Dražby – dobrovoľní dražobníci
@@ -336,8 +402,8 @@ def _scrape_ov_detail(page, item):
     # Subject type from text (with vehicle detection)
     subject_type = _detect_subject_type(body_text)
 
-    # Skip non-real-estate auctions (vehicles, movables only)
-    if subject_type in ("Vozidlo", "Hnuteľný majetok"):
+    # Skip non-real-estate auctions (vehicles, movables, monetary claims)
+    if subject_type in ("Vozidlo", "Hnuteľný majetok", "Pohľadávka"):
         logger.debug(f"Skipping non-real-estate auction {form_id}: {subject_type}")
         return None
 
@@ -398,116 +464,149 @@ def _extract_property_location(body_text):
     region = ""
     street = ""
 
-    # Strategy 1: Find location from the property description section
-    # Look for "katastrálny odbor" or "LV č." context which describes property location
-    # Pattern: "okres DISTRICT, obec CITY" or "obec CITY, okres DISTRICT"
+    # Find property section (everything after "Predmet dražby" marker)
     property_section = ""
-    for marker in ['Predmet dražby', 'predmet dražby', 'PREDMET', 'predmetom']:
+    for marker in ['Predmet dražby', 'predmet dražby', 'PREDMET', 'predmetom',
+                    'Označenie predmetu', 'Nehnuteľnost', 'nehnuteľnost']:
         idx = body_text.lower().find(marker.lower())
         if idx >= 0:
             property_section = body_text[idx:idx + 5000]
             break
 
     if property_section:
-        # Primary pattern: "okres: DISTRICT, obec: CITY, katastrálne územie: KU"
-        m = re.search(r'okres[:\s]+([^,\n]+?),\s*obec[:\s]+([^,\n]+?)(?:,\s*katastr|\s*$|\n)', property_section, re.IGNORECASE)
-        if m:
-            district = m.group(1).strip()[:80]
-            city = m.group(2).strip()[:80]
-
-        # Alt pattern: "obec CITY, okres DISTRICT"
-        if not city:
-            m = re.search(r'obec[:\s]+([A-ZÁ-Ža-zá-ž\s-]+?)(?:\s*,\s*okres[:\s]+([A-ZÁ-Ža-zá-ž\s-]+?))?(?:\s*,|\s*katastr|\s*\n|\s*$)', property_section, re.IGNORECASE)
+        # --- Extract DISTRICT (okres) ---
+        # Pattern: "okres: DISTRICT" or "okres DISTRICT" or "Okresný úrad DISTRICT"
+        district_patterns = [
+            r'okres[:\s]+([A-ZÁ-Ža-zá-ž\s-]{3,50}?)(?:\s*,|\s*obec|\s*katastr|\s*\n|\s*zapís|\s*evidovan)',
+            r'[Oo]kresný\s+(?:súd|úrad)\s+([A-ZÁ-Ža-zá-ž\s-]{3,50}?)(?:\s*,|\s*katastr|\s*\n)',
+        ]
+        for pattern in district_patterns:
+            m = re.search(pattern, property_section, re.IGNORECASE)
             if m:
                 candidate = m.group(1).strip()
-                # Reject table headers
-                if candidate.lower() not in ('', 'katastrálne územie', 'katastrálne', 'územie'):
+                # Verify it's a known district or at least a reasonable name
+                if len(candidate) >= 3 and candidate.lower() not in ('súd', 'úrad'):
+                    district = candidate[:80]
+                    break
+
+        # --- Extract CITY (obec) ---
+        city_patterns = [
+            # "obec: CITY" or "obec CITY"
+            r'obec[:\s]+([A-ZÁ-Ža-zá-ž][A-ZÁ-Ža-zá-ž\s-]{1,50}?)(?:\s*,|\s*katastr|\s*okres|\s*\n|\s*$)',
+            # "okres X, obec Y"
+            r'okres[:\s]+[^,\n]+,\s*obec[:\s]+([A-ZÁ-Ža-zá-ž][A-ZÁ-Ža-zá-ž\s-]{1,50}?)(?:\s*,|\s*katastr|\s*\n)',
+            # "k.ú. X, obec Y"
+            r'k\.ú\.\s*[^,]+,\s*obec[:\s]+([A-ZÁ-Ža-zá-ž][^,\n]{1,50}?)(?:\s*,|\s*okres|\s*\n)',
+        ]
+        for pattern in city_patterns:
+            m = re.search(pattern, property_section, re.IGNORECASE)
+            if m:
+                candidate = m.group(1).strip()
+                if _is_valid_location_name(candidate):
                     city = candidate[:80]
-                if m.group(2):
-                    district = m.group(2).strip()[:80]
+                    break
 
-        # Alt pattern: "okres DISTRICT" alone
-        if not district:
-            m = re.search(r'okres[:\s]+([A-ZÁ-Ža-zá-ž\s-]{3,40})(?:\s*,|\s*obec|\s*katastr|\s*\n|\s*zapís)', property_section, re.IGNORECASE)
-            if m:
-                district = m.group(1).strip()[:80]
-
-        # Try: "k.ú. KATASTER, obec CITY, okres DISTRICT"
+        # --- Fallback: katastrálne územie as city ---
         if not city:
-            m = re.search(r'k\.ú\.\s*([^,]+),\s*obec[:\s]+([^,]+),\s*okres[:\s]+([^\n,]+)', property_section)
-            if m:
-                city = m.group(2).strip()[:80]
-                if not district:
-                    district = m.group(3).strip()[:80]
+            ku_patterns = [
+                r'katastrálne\s+územie[:\s]+([A-ZÁ-Ža-zá-ž][A-ZÁ-Ža-zá-ž\s-]{1,50}?)(?:\s*,|\s*zapís|\s*okres|\s*\n|\s*$)',
+                r'k\.ú\.\s+([A-ZÁ-Ža-zá-ž][A-ZÁ-Ža-zá-ž\s-]{1,50}?)(?:\s*,|\s*obec|\s*okres|\s*\n|\s*$)',
+                r'katastrálnom\s+území\s+([A-ZÁ-Ža-zá-ž][A-ZÁ-Ža-zá-ž\s-]{1,50}?)(?:\s*,|\s*obec|\s*okres|\s*\n|\s*$)',
+            ]
+            for pattern in ku_patterns:
+                m = re.search(pattern, property_section, re.IGNORECASE)
+                if m:
+                    candidate = m.group(1).strip()
+                    if _is_valid_location_name(candidate):
+                        city = candidate[:80]
+                        break
 
-        # Table format: "Okres || Obec || Katastrálne územie" followed by values
+        # --- Table format: "Okres | Obec | Katastrálne územie" followed by values ---
         if not city:
             m = re.search(r'Okres[^\n]*Obec[^\n]*Katastr[^\n]*\n+([^\n]+)', property_section)
             if m:
                 values_line = m.group(1)
                 parts = re.split(r'\t+|\|\|', values_line)
                 parts = [p.strip() for p in parts if p.strip() and p.strip() not in ('', '>', '|') and not p.strip().isdigit()]
-                # Usually format: [OKRES_URAD, OKRES, OBEC, KAT_UZEMIE] or [OKRES, OBEC, KAT_UZEMIE]
                 if len(parts) >= 3:
-                    # Take the 2nd-last and 3rd-last as likely obec and okres
                     city = parts[-2][:80] if len(parts[-2]) > 2 else ""
                     if not district:
                         district = parts[-3][:80] if len(parts) > 3 and len(parts[-3]) > 2 else ""
                 elif len(parts) >= 2:
                     city = parts[-1][:80]
 
-    # Strategy 2: Fallback — look for "Názov obce" specifically in property section
+    # --- Fallback: "Názov obce" in property section ---
     if not city:
-        # Skip the first "Názov obce" (auctioneer) and look for the property one
-        all_city_matches = list(re.finditer(r'zov obce[:\s\t]+([^\n\t]+)', body_text, re.IGNORECASE))
+        all_city_matches = list(re.finditer(r'[Nn]ázov\s+obce[:\s\t]+([^\n\t]+)', body_text, re.IGNORECASE))
         if len(all_city_matches) >= 2:
-            # Use the LAST occurrence (more likely to be property)
             city = all_city_matches[-1].group(1).strip()[:80]
-        elif len(all_city_matches) == 1 and property_section:
-            # Only use the single match if it's in the property section
+        elif len(all_city_matches) == 1:
             match_pos = all_city_matches[0].start()
             prop_start = body_text.lower().find('predmet')
             if prop_start >= 0 and match_pos > prop_start:
                 city = all_city_matches[0].group(1).strip()[:80]
 
-    # Strategy 3: For executor auctions, look for property address after "Nehnuteľnosti"
+    # --- Fallback: "Nehnuteľnosti ... obec X" ---
     if not city:
-        m = re.search(r'[Nn]ehnuteľnost[ií][^\n]*obec\s+([A-ZÁ-Ža-zá-ž\s-]+?)(?:\s*,|\s*okres)', body_text)
+        m = re.search(r'[Nn]ehnuteľnost[ií][^\n]*obec\s+([A-ZÁ-Ža-zá-ž][A-ZÁ-Ža-zá-ž\s-]+?)(?:\s*,|\s*okres)', body_text)
+        if m:
+            city = m.group(1).strip()[:80]
+
+    # --- Fallback: location from "nachádzajúc" (located in) context ---
+    if not city:
+        m = re.search(r'nach[áa]dzaj[úu]c[^\n]{0,30}(?:v obci|v meste|v)\s+([A-ZÁ-Ž][a-zá-ž]+(?:\s+[A-Za-zÁ-Ža-zá-ž]+)?)', body_text)
         if m:
             city = m.group(1).strip()[:80]
 
     # Clean up district
     if district:
-        district = re.sub(r'\s+(a to|a|zapís|evidovan|katastr|na LV).*', '', district, flags=re.IGNORECASE).strip()
+        district = re.sub(r'\s+(a to|a\s|zapís|evidovan|katastr|na LV|vedenom).*', '', district, flags=re.IGNORECASE).strip()
         if len(district) > 60:
             district = district[:60]
 
     # Clean up city - reject bad values
-    bad_values = ['katastrálne územie', 'katastrálne', 'územie', 'okresný úrad',
-                  'parcelné číslo', 'register', 'evidované', 'mape', 'parcely',
-                  'obec', 'okres', 'druh pozemku', 'výmera', 'spoluvlastnícky']
-    if city.lower().strip() in bad_values or len(city) < 2:
+    if not _is_valid_location_name(city):
         city = ""
-    if district.lower().strip() in bad_values or len(district) < 2:
+    if not _is_valid_location_name(district):
         district = ""
 
-    # Region detection
-    text_lower = body_text.lower()
-    for rcode, rname in REGION_MAP.items():
-        if rname.lower() in text_lower:
-            region = rname
-            break
-    # Also try "XY kraj" pattern
+    # --- Region detection: prefer district→region mapping ---
+    if district:
+        region = _region_from_district(district)
+
+    # Fallback: search for region name in property section first, then full text
     if not region:
-        m = re.search(r'(\w+)\s+kraj', body_text)
+        search_text = property_section.lower() if property_section else body_text.lower()
+        for rcode, rname in REGION_MAP.items():
+            if rname.lower() in search_text:
+                region = rname
+                break
+
+    # Fallback: "XY kraj" pattern
+    if not region:
+        m = re.search(r'([A-ZÁ-Ža-zá-ž]+ský|[A-ZÁ-Ža-zá-ž]+sky|[A-ZÁ-Ža-zá-ž]+cký|[A-ZÁ-Ža-zá-ž]+ický)\s+kraj', body_text, re.IGNORECASE)
         if m:
             candidate = m.group(1).strip()
             for rname in REGION_MAP.values():
-                if candidate.lower() in rname.lower():
+                if candidate.lower() in rname.lower() or rname.lower().startswith(candidate.lower()):
                     region = rname
                     break
 
     return city, district, region, street
+
+
+def _is_valid_location_name(name):
+    """Check if a string is a valid location name (not a table header or keyword)."""
+    if not name or len(name.strip()) < 2:
+        return False
+    bad_values = [
+        'katastrálne územie', 'katastrálne', 'územie', 'okresný úrad',
+        'parcelné číslo', 'register', 'evidované', 'mape', 'parcely',
+        'obec', 'okres', 'druh pozemku', 'výmera', 'spoluvlastnícky',
+        'súpisné číslo', 'číslo parcely', 'list vlastníctva', 'podiel',
+        'popis', 'označenie', 'predmet', 'nehnuteľnosť', 'dražby',
+    ]
+    return name.lower().strip() not in bad_values
 
 
 def _detect_subject_type(text):
@@ -529,6 +628,14 @@ def _detect_subject_type(text):
         has_realestate = any(kw in predmet_section for kw in ['nehnuteľnost', 'pozemok', 'parcela', 'dom', 'byt', 'stavba'])
         if not has_realestate:
             return "Vozidlo"
+
+    # Check for monetary claims (pohľadávky) - not real estate
+    claim_keywords = ['pohľadávk', 'peňažn', 'odkúpenie pohľadávk', 'postúpenie pohľadávk',
+                      'zabezpečen', 'záložné právo na pohľadávk']
+    if any(kw in predmet_section for kw in claim_keywords):
+        has_realestate = any(kw in predmet_section for kw in ['nehnuteľnost', 'pozemok', 'parcela', 'dom', 'byt', 'stavba'])
+        if not has_realestate:
+            return "Pohľadávka"
 
     # Check for pure movable property
     movable_only_patterns = [
@@ -896,7 +1003,14 @@ def _scrape_drazby_detail(page, auction_id):
                     result['district'] = district_match.group(1).strip()
                 region_match = re.search(r'(\w+)\s+kraj', line)
                 if region_match:
-                    result['region'] = region_match.group(1).strip() + " kraj" if "ský" not in region_match.group(1) else region_match.group(1).strip()
+                    candidate = region_match.group(1).strip()
+                    # Map to canonical region name
+                    matched_region = ""
+                    for rname in REGION_MAP.values():
+                        if candidate.lower() in rname.lower() or rname.lower().startswith(candidate.lower()):
+                            matched_region = rname
+                            break
+                    result['region'] = matched_region or candidate
                 # City is usually the line with PSC
                 psc_match = re.search(r'\d{3}\s*\d{2}\s+(.+)', line)
                 if psc_match:
@@ -908,6 +1022,10 @@ def _scrape_drazby_detail(page, auction_id):
     desc_match = re.search(r'POPIS\s+NEHNUTEĽNOSTI\s*(.*?)(?=ROZLOHA|INFORMÁCIE|DÁTUM)', body_text, re.DOTALL)
     if desc_match:
         result['description'] = desc_match.group(1).strip()[:2000]
+
+    # District→region fallback
+    if result.get('district') and not result.get('region'):
+        result['region'] = _region_from_district(result['district'])
 
     return result if result else None
 
