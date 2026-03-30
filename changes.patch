@@ -1,0 +1,101 @@
+From 5cbd90dc9a0c81ad674fa77e68f01bb9de59467f Mon Sep 17 00:00:00 2001
+From: kurocka <peter.kurocka@gmail.com>
+Date: Mon, 30 Mar 2026 13:20:12 +0200
+Subject: [PATCH 1/2] Add auto-sync on startup when database is empty
+
+After Railway redeploy (SQLite resets), the app now automatically
+triggers a full sync in the background - no manual clicking needed.
+Runs API syncs first (fast), then Playwright syncs (comprehensive).
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ app.py | 49 +++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 49 insertions(+)
+
+diff --git a/app.py b/app.py
+index 0ba4cfe..4f6e931 100644
+--- a/app.py
++++ b/app.py
+@@ -265,8 +265,57 @@ def api_stats():
+         conn.close()
+ 
+ 
++def _startup_sync():
++    """Run initial sync on startup if database is empty (e.g. after Railway redeploy)."""
++    import threading
++    conn = get_db()
++    try:
++        count = conn.execute("SELECT COUNT(*) FROM auctions").fetchone()[0]
++    finally:
++        conn.close()
++
++    if count > 0:
++        logger.info(f"Database has {count} auctions, skipping startup sync")
++        return
++
++    logger.info("Database is empty, starting auto-sync in background...")
++
++    def _run_sync():
++        global _sync_running
++        if _sync_running:
++            return
++        _sync_running = True
++        try:
++            # First: quick API syncs
++            try:
++                sync_drazby_sk()
++            except Exception as e:
++                logger.error(f"Startup drazby API sync error: {e}")
++            try:
++                sync_datahub_ov()
++            except Exception as e:
++                logger.error(f"Startup OV API sync error: {e}")
++            # Then: Playwright syncs (slower but more data)
++            try:
++                sync_drazby_playwright()
++            except Exception as e:
++                logger.error(f"Startup drazby Playwright sync error: {e}")
++            try:
++                sync_ov_playwright()
++            except Exception as e:
++                logger.error(f"Startup OV Playwright sync error: {e}")
++            logger.info("Startup sync completed!")
++        finally:
++            _sync_running = False
++
++    thread = threading.Thread(target=_run_sync, daemon=True)
++    thread.start()
++
++
+ if __name__ == "__main__":
+     scheduler.start()
+     port = int(os.environ.get("PORT", 5555))
+     debug = os.environ.get("RAILWAY_ENVIRONMENT") is None
++    # Auto-sync on startup if DB is empty
++    _startup_sync()
+     app.run(host="0.0.0.0", debug=debug, port=port, use_reloader=False)
+-- 
+2.43.0
+
+
+From bc680f80b5f94cc3eafdf48b3ebdea55a0bc69a7 Mon Sep 17 00:00:00 2001
+From: kurocka <peter.kurocka@gmail.com>
+Date: Mon, 30 Mar 2026 11:46:49 +0000
+Subject: [PATCH 2/2] Add .venv to .gitignore
+
+---
+ .gitignore | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/.gitignore b/.gitignore
+index 53804f6..fdcf878 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -3,3 +3,4 @@ __pycache__/
+ *.db
+ .env
+ .claude/
++.venv/
+-- 
+2.43.0
+
